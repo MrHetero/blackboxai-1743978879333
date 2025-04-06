@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WASD Adventure Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        body {
+            font-family: 'Press Start 2P', cursive;
+            overflow: hidden;
+            background-color: #0f172a;
+        }
+        #gameCanvas {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+        }
+        .neon-text {
+            text-shadow: 0 0 5px #fff, 0 0 10px #fff, 0 0 20px #0ff, 0 0 30px #0ff;
+        }
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen text-cyan-100 p-4">
+    <h1 class="text-4xl mb-4 neon-text">WASD ADVENTURE</h1>
+    
+    <div class="relative">
+        <canvas id="gameCanvas" width="800" height="500" class="rounded-lg border-2 border-cyan-400"></canvas>
+        
+        <!-- Game UI -->
+        <div id="scoreDisplay" class="absolute top-4 left-4 text-xl">SCORE: 0</div>
+        <div id="highScoreDisplay" class="absolute top-4 right-4 text-xl">HIGH: 0</div>
+        
+        <!-- Start Screen -->
+        <div id="startScreen" class="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-70">
+            <h2 class="text-3xl mb-8 neon-text pulse">WASD ADVENTURE</h2>
+            <p class="text-xl mb-4">Use WASD to move</p>
+            <p class="text-lg mb-8">Collect coins, avoid enemies</p>
+            <button id="startButton" class="px-6 py-3 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-lg transition-all">
+                START GAME
+            </button>
+        </div>
+        
+        <!-- Game Over Screen -->
+        <div id="gameOverScreen" class="absolute inset-0 hidden flex-col items-center justify-center bg-black bg-opacity-70">
+            <h2 class="text-3xl mb-4 neon-text">GAME OVER</h2>
+            <p id="finalScore" class="text-xl mb-2">SCORE: 0</p>
+            <p id="newHighScore" class="text-lg mb-8 text-green-400 hidden">NEW HIGH SCORE!</p>
+            <button id="restartButton" class="px-6 py-3 bg-cyan-600 hover:bg-cyan-500 rounded-lg text-lg transition-all">
+                PLAY AGAIN
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Game Constants
+        const PLAYER_SIZE = 30;
+        const COIN_SIZE = 20;
+        const ENEMY_SIZE = 25;
+        const PLAYER_SPEED = 5;
+        const ENEMY_SPEED = 2;
+        const COIN_SPEED = 1.5;
+        const FRICTION = 0.9;
+        const COIN_SPAWN_RATE = 60;
+        const ENEMY_SPAWN_RATE = 300;
+        
+        // Game State
+        let canvas, ctx;
+        let gameRunning = false;
+        let score = 0;
+        let highScore = localStorage.getItem('highScore') || 0;
+        let gameTime = 0;
+        let difficulty = 1;
+        
+        // Game Objects
+        let player = {
+            x: 400,
+            y: 250,
+            velX: 0,
+            velY: 0,
+            color: '#3b82f6'
+        };
+        
+        let coins = [];
+        let enemies = [];
+        let particles = [];
+        
+        // Controls
+        const keys = {
+            w: false,
+            a: false,
+            s: false,
+            d: false
+        };
+        
+        // DOM Elements
+        let startScreen, gameOverScreen, scoreDisplay, highScoreDisplay;
+        let startButton, restartButton;
+        let finalScoreDisplay, newHighScoreDisplay;
+        
+        // Initialize Game
+        function init() {
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+            
+            // Get UI elements
+            startScreen = document.getElementById('startScreen');
+            gameOverScreen = document.getElementById('gameOverScreen');
+            scoreDisplay = document.getElementById('scoreDisplay');
+            highScoreDisplay = document.getElementById('highScoreDisplay');
+            startButton = document.getElementById('startButton');
+            restartButton = document.getElementById('restartButton');
+            finalScoreDisplay = document.getElementById('finalScore');
+            newHighScoreDisplay = document.getElementById('newHighScore');
+            
+            // Set high score display
+            highScoreDisplay.textContent = `HIGH: ${highScore}`;
+            
+            // Event Listeners
+            startButton.addEventListener('click', startGame);
+            restartButton.addEventListener('click', startGame);
+            
+            document.addEventListener('keydown', (e) => {
+                if (e.key.toLowerCase() === 'w') keys.w = true;
+                if (e.key.toLowerCase() === 'a') keys.a = true;
+                if (e.key.toLowerCase() === 's') keys.s = true;
+                if (e.key.toLowerCase() === 'd') keys.d = true;
+                if (e.key === 'Enter' && !gameRunning) startGame();
+            });
+            
+            document.addEventListener('keyup', (e) => {
+                if (e.key.toLowerCase() === 'w') keys.w = false;
+                if (e.key.toLowerCase() === 'a') keys.a = false;
+                if (e.key.toLowerCase() === 's') keys.s = false;
+                if (e.key.toLowerCase() === 'd') keys.d = false;
+            });
+            
+            // Start the game loop
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start Game
+        function startGame() {
+            // Reset game state
+            gameRunning = true;
+            score = 0;
+            gameTime = 0;
+            difficulty = 1;
+            coins = [];
+            enemies = [];
+            particles = [];
+            
+            // Reset player position
+            player.x = 400;
+            player.y = 250;
+            player.velX = 0;
+            player.velY = 0;
+            
+            // Update UI
+            scoreDisplay.textContent = `SCORE: ${score}`;
+            startScreen.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+        }
+        
+        // Game Over
+        function gameOver() {
+            gameRunning = false;
+            
+            // Check for high score
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('highScore', highScore);
+                newHighScoreDisplay.style.display = 'block';
+            } else {
+                newHighScoreDisplay.style.display = 'none';
+            }
+            
+            // Update UI
+            finalScoreDisplay.textContent = `SCORE: ${score}`;
+            highScoreDisplay.textContent = `HIGH: ${highScore}`;
+            gameOverScreen.style.display = 'flex';
+        }
+        
+        // Spawn Coin
+        function spawnCoin() {
+            const side = Math.floor(Math.random() * 4);
+            let x, y;
+            
+            switch(side) {
+                case 0: // top
+                    x = Math.random() * canvas.width;
+                    y = -COIN_SIZE;
+                    break;
+                case 1: // right
+                    x = canvas.width + COIN_SIZE;
+                    y = Math.random() * canvas.height;
+                    break;
+                case 2: // bottom
+                    x = Math.random() * canvas.width;
+                    y = canvas.height + COIN_SIZE;
+                    break;
+                case 3: // left
+                    x = -COIN_SIZE;
+                    y = Math.random() * canvas.height;
+                    break;
+            }
+            
+            coins.push({
+                x: x,
+                y: y,
+                color: '#f59e0b',
+                collected: false
+            });
+        }
+        
+        // Spawn Enemy
+        function spawnEnemy() {
+            const side = Math.floor(Math.random() * 4);
+            let x, y;
+            
+            switch(side) {
+                case 0: // top
+                    x = Math.random() * canvas.width;
+                    y = -ENEMY_SIZE;
+                    break;
+                case 1: // right
+                    x = canvas.width + ENEMY_SIZE;
+                    y = Math.random() * canvas.height;
+                    break;
+                case 2: // bottom
+                    x = Math.random() * canvas.width;
+                    y = canvas.height + ENEMY_SIZE;
+                    break;
+                case 3: // left
+                    x = -ENEMY_SIZE;
+                    y = Math.random() * canvas.height;
+                    break;
+            }
+            
+            enemies.push({
+                x: x,
+                y: y,
+                color: '#ef4444',
+                speed: ENEMY_SPEED * (0.8 + Math.random() * 0.4) * difficulty
+            });
+        }
+        
+        // Create Particles
+        function createParticles(x, y, color, count) {
+            for (let i = 0; i < count; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    size: Math.random() * 4 + 2,
+                    color: color,
+                    velX: (Math.random() - 0.5) * 6,
+                    velY: (Math.random() - 0.5) * 6,
+                    life: 30 + Math.random() * 30
+                });
+            }
+        }
+        
+        // Update Game State
+        function update() {
+            if (!gameRunning) return;
+            
+            gameTime++;
+            
+            // Update difficulty
+            difficulty = 1 + Math.floor(gameTime / 1000) * 0.2;
+            
+            // Player movement
+            if (keys.w) player.velY = -PLAYER_SPEED;
+            if (keys.s) player.velY = PLAYER_SPEED;
+            if (keys.a) player.velX = -PLAYER_SPEED;
+            if (keys.d) player.velX = PLAYER_SPEED;
+            
+            // Apply friction
+            player.velX *= FRICTION;
+            player.velY *= FRICTION;
+            
+            // Update player position
+            player.x += player.velX;
+            player.y += player.velY;
+            
+            // Boundary check
+            player.x = Math.max(PLAYER_SIZE/2, Math.min(canvas.width - PLAYER_SIZE/2, player.x));
+            player.y = Math.max(PLAYER_SIZE/2, Math.min(canvas.height - PLAYER_SIZE/2, player.y));
+            
+            // Spawn coins
+            if (gameTime % Math.max(10, Math.floor(COIN_SPAWN_RATE / difficulty)) === 0) {
+                spawnCoin();
+            }
+            
+            // Spawn enemies
+            if (gameTime % Math.max(60, Math.floor(ENEMY_SPAWN_RATE / difficulty)) === 0) {
+                spawnEnemy();
+            }
+            
+            // Update coins
+            for (let i = coins.length - 1; i >= 0; i--) {
+                const coin = coins[i];
+                
+                if (coin.collected) {
+                    coins.splice(i, 1);
+                    continue;
+                }
+                
+                // Move coin toward player
+                const dx = player.x - coin.x;
+                const dy = player.y - coin.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                
+                if (dist > 0) {
+                    coin.x += (dx / dist) * COIN_SPEED * difficulty;
+                    coin.y += (dy / dist) * COIN_SPEED * difficulty;
+                }
+                
+                // Check collision with player
+                if (dist < (PLAYER_SIZE + COIN_SIZE) / 2) {
+                    coin.collected = true;
+                    score += 10 * difficulty;
+                    scoreDisplay.textContent = `SCORE: ${Math.floor(score)}`;
+                    createParticles(coin.x, coin.y, coin.color, 10);
+                }
+            }
+            
+            // Update enemies
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                const enemy = enemies[i];
+                
+                // Move enemy toward player
+                const dx = player.x - enemy.x;
+                const dy = player.y - enemy.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                
+                if (dist > 0) {
+                    enemy.x += (dx / dist) * enemy.speed;
+                    enemy.y += (dy / dist) * enemy.speed;
+                }
+                
+                // Check collision with player
+                if (dist < (PLAYER_SIZE + ENEMY_SIZE) / 2) {
+                    gameOver();
+                }
+            }
+            
+            // Update particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.velX;
+                p.y += p.velY;
+                p.life--;
+                
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+        }
+        
+        // Render Game
+        function render() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (!gameRunning) return;
+            
+            // Draw grid
+            ctx.strokeStyle = 'rgba(100, 200, 255, 0.1)';
+            ctx.lineWidth = 1;
+            
+            const gridSize = 40;
+            for (let x = 0; x < canvas.width; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+            
+            // Draw coins
+            for (const coin of coins) {
+                if (coin.collected) continue;
+                
+                ctx.beginPath();
+                ctx.arc(coin.x, coin.y, COIN_SIZE/2, 0, Math.PI * 2);
+                ctx.fillStyle = coin.color;
+                ctx.fill();
+                
+                // Inner circle
+                ctx.beginPath();
+                ctx.arc(coin.x, coin.y, COIN_SIZE/3, 0, Math.PI * 2);
+                ctx.fillStyle = '#fbbf24';
+                ctx.fill();
+            }
+            
+            // Draw enemies
+            for (const enemy of enemies) {
+                ctx.beginPath();
+                ctx.arc(enemy.x, enemy.y, ENEMY_SIZE/2, 0, Math.PI * 2);
+                ctx.fillStyle = enemy.color;
+                ctx.fill();
+                
+                // Eyes
+                const dx = player.x - enemy.x;
+                const dy = player.y - enemy.y;
+                const angle = Math.atan2(dy, dx);
+                
+                const eyeX = enemy.x + Math.cos(angle) * ENEMY_SIZE/4;
+                const eyeY = enemy.y + Math.sin(angle) * ENEMY_SIZE/4;
+                
+                ctx.beginPath();
+                ctx.arc(eyeX, eyeY, ENEMY_SIZE/8, 0, Math.PI * 2);
+                ctx.fillStyle = 'white';
+                ctx.fill();
+            }
+            
+            // Draw player
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, PLAYER_SIZE/2, 0, Math.PI * 2);
+            ctx.fillStyle = player.color;
+            ctx.fill();
+            
+            // Player direction indicator
+            if (player.velX !== 0 || player.velY !== 0) {
+                const angle = Math.atan2(player.velY, player.velX);
+                const indicatorX = player.x + Math.cos(angle) * PLAYER_SIZE/2;
+                const indicatorY = player.y + Math.sin(angle) * PLAYER_SIZE/2;
+                
+                ctx.beginPath();
+                ctx.arc(indicatorX, indicatorY, PLAYER_SIZE/4, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+            }
+            
+            // Draw particles
+            for (const p of particles) {
+                ctx.globalAlpha = p.life / 60;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fillStyle = p.color;
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+            
+            // Draw difficulty meter
+            const meterWidth = 200;
+            const meterHeight = 10;
+            const meterX = canvas.width - meterWidth - 20;
+            const meterY = 20;
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(meterX, meterY, meterWidth, meterHeight);
+            
+            ctx.fillStyle = '#10b981';
+            ctx.fillRect(meterX, meterY, meterWidth * Math.min(1, difficulty/3), meterHeight);
+            
+            ctx.strokeStyle = '#ffffff';
+            ctx.strokeRect(meterX, meterY, meterWidth, meterHeight);
+            
+            ctx.fillStyle = '#ffffff';
+            ctx.font = '12px "Press Start 2P"';
+            ctx.fillText(`DIFFICULTY: ${difficulty.toFixed(1)}x`, meterX, meterY - 5);
+        }
+        
+        // Game Loop
+        function gameLoop() {
+            update();
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start the game when the page loads
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
